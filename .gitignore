@@ -1,0 +1,33 @@
+# Folder sampah Unity (Jangan di-upload)
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/[Ll]ogs/
+/[Mm]emoryCaptures/
+
+# IDE specific (Visual Studio / VS Code / Rider)
+.vscode/
+.vs/
+.idea/
+*.csproj
+*.sln
+*.suo
+*.tmp
+*.user
+*.userprefs
+*.pidb
+*.booproj
+*.svd
+*.pdb
+*.opendb
+*.VC.db
+
+# OS generated
+.DS_Store
+Thumbs.db
+
+# Builds output
+*.apk
+*.unitypackage
