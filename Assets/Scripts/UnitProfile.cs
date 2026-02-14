@@ -10,12 +10,12 @@ public class UnitProfile : ScriptableObject {
     public int delayPoint;
     public int healthPoint;
 
-    // Properti otomatis untuk konversi ke nilai nyata sesuai rumus paper
-    public float RealHealth => healthPoint * 50f; // [cite: 290]
-    public float RealAttack => attackPoint * 10f; // [cite: 290]
-    public float RealFire => firePoint * 10f;     // [cite: 290]
-    public float RealDelay => (5f - delayPoint) / 10f; // [cite: 291]
+    // Konversi poin ke nilai nyata sesuai paper
+    public float RealHealth => healthPoint * 50f; 
+    public float RealAttack => attackPoint * 10f; 
+    public float RealFire => firePoint * 10f;     
+    public float RealDelay => (5f - delayPoint) / 10f; 
     
     [Header("TA Extension")]
-    public float attackRange; // Untuk input baru kamu di Eks 3 & 4
+    public float attackRange; 
 }

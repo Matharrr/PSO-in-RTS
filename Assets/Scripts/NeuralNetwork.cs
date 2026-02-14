@@ -3,11 +3,11 @@ using UnityEngine;
 
 [Serializable]
 public class NeuralNetwork {
-    public int inputSize;   // 37 atau 45
-    public int hiddenSize = 18; // 
-    public int outputSize = 3;  // [cite: 323]
+    public int inputSize;   
+    public int hiddenSize = 18; 
+    public int outputSize = 3;  
 
-    public float[] weights; // Total: (In*Hid) + (Hid*Out)
+    public float[] weights; 
 
     public NeuralNetwork(int inputCount) {
         this.inputSize = inputCount;
@@ -19,8 +19,8 @@ public class NeuralNetwork {
         float[] hiddenLayer = new float[hiddenSize];
         float[] outputs = new float[outputSize];
 
-        // 1. Input to Hidden
         int wIdx = 0;
+        // Input to Hidden
         for (int i = 0; i < hiddenSize; i++) {
             float sum = 0;
             for (int j = 0; j < inputSize; j++) {
@@ -29,7 +29,7 @@ public class NeuralNetwork {
             hiddenLayer[i] = Sigmoid(sum);
         }
 
-        // 2. Hidden to Output
+        // Hidden to Output
         for (int i = 0; i < outputSize; i++) {
             float sum = 0;
             for (int j = 0; j < hiddenSize; j++) {
@@ -40,7 +40,5 @@ public class NeuralNetwork {
         return outputs;
     }
 
-    private float Sigmoid(float x) {
-        return 1f / (1f + Mathf.Exp(-x)); // 
-    }
+    private float Sigmoid(float x) => 1f / (1f + Mathf.Exp(-x));
 }
