@@ -14,6 +14,7 @@ GameObject:
   - component: {fileID: 7181132251502558655}
   - component: {fileID: 904104614248588439}
   - component: {fileID: 7176179003791517120}
+  - component: {fileID: 307772586106773908}
   m_Layer: 0
   m_Name: Axeman
   m_TagString: Untagged
@@ -240,3 +241,18 @@ LineRenderer:
   m_UseWorldSpace: 1
   m_Loop: 1
   m_ApplyActiveColorSpace: 1
+--- !u!114 &307772586106773908
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 3915877170759048954}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5288e46fc46241e4ea29f321ace6e529, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  profile: {fileID: 11400000, guid: c229237c720df534393d44d161e526da, type: 2}
+  currentHealth: 0
+  isDead: 0
