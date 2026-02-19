@@ -10,12 +10,14 @@ public class UnitProfile : ScriptableObject {
     public int delayPoint;
     public int healthPoint;
 
-    // Konversi poin ke nilai nyata sesuai paper
-    public float RealHealth => healthPoint * 50f; 
-    public float RealAttack => attackPoint * 10f; 
-    public float RealFire => firePoint * 10f;     
-    public float RealDelay => (5f - delayPoint) / 10f; 
-    
-    [Header("TA Extension")]
-    public float attackRange; 
+    // Konversi poin ke nilai nyata sesuai paper (Table V)
+    public float RealHealth => healthPoint * 50f;
+    public float RealAttack => attackPoint * 10f;
+    public float RealFire   => firePoint   * 10f;
+
+    /// <summary>
+    /// Interval timer ANN per paper Table V: (7 - delayPoint) × 0.1 detik.
+    /// Cavalry (6) → 0.1s | Swordman (5) → 0.2s | Very Heavy (1) → 0.6s
+    /// </summary>
+    public float RealDelayTimer => (7f - delayPoint) * 0.1f;
 }

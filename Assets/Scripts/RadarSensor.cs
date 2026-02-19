@@ -1,85 +1,99 @@
 using UnityEngine;
-using System.Collections.Generic;
 
+/// <summary>
+/// Menghasilkan tepat 37 input neuron sesuai definisi paper
+/// Widhiyasana et al. 2022, Table II.
+///
+/// PETA 37 INPUT (index 0-based, nomor 1-based = nomor di paper):
+///
+///  [0 – 3]   Id 1–4   Region 1–4  Enemy  Average Distance  (0–1)
+///  [4 – 7]   Id 5–8   Region 1–4  Friend Average Distance  (0–1)
+///  [8 – 11]  Id 9–12  Region 1–4  Number of Enemy          (0–1)
+///  [12–15]   Id 13–16 Region 1–4  Number of Friend         (0–1)
+///  [16]      Id 17    Self Current Health                   (0–1)
+///  [17]      Id 18    Self Delay                            (0–1)
+///  [18]      Id 19    Self Attack                           (0–1)
+///  [19]      Id 20    Self Fire                             (0–1)
+///  [20]      Id 21    Prev output 2 (Attack/Fire/Move)      (0–1)
+///  [21–28]   Id 22–29 Enemy  at Grid 1–8                    (0 or 1)
+///  [29–36]   Id 30–37 Friend at Grid 1–8                    (0 or 1)
+/// </summary>
 public class RadarSensor : MonoBehaviour {
+
     [Header("Sensor Settings")]
-    public float sensorRadius = 25f; 
-    public LayerMask unitLayer; // Di Inspector, pilih Team_A dan Team_B
+    public float sensorRadius = 25f; // Radius deteksi region besar
+    public float gridRadius   =  5f; // Radius deteksi grid kecil (small-scale)
+    public LayerMask unitLayer;      // Layer Team_A dan Team_B
 
-    public float[] GetNeuronInputs(int inputCount) {
-        float[] inputs = new float[inputCount];
-        
-        // 1. Deteksi semua unit dalam radius menggunakan Physics
+    // Diisi NPCController setiap step sebagai input 21 (index 20)
+    [HideInInspector] public float previousActionOutput = 0f;
+
+    private const int REGION_COUNT = 4; // 4 kuadran 90°
+    private const int GRID_COUNT   = 8; // 8 arah 45°
+    private const int INPUT_SIZE   = 37;
+
+    public float[] GetNeuronInputs() {
+        float[] inputs = new float[INPUT_SIZE];
+
+        // Akumulator per-region
+        float[] enemyDistSum  = new float[REGION_COUNT];
+        float[] friendDistSum = new float[REGION_COUNT];
+        int[]   enemyCount    = new int[REGION_COUNT];
+        int[]   friendCount   = new int[REGION_COUNT];
+
         Collider[] hits = Physics.OverlapSphere(transform.position, sensorRadius, unitLayer);
-        
         foreach (var hit in hits) {
-            if (hit.gameObject == gameObject) continue; // Abaikan diri sendiri
+            if (hit.gameObject == gameObject) continue;
 
-            Vector3 direction = hit.transform.position - transform.position;
-            float distance = direction.magnitude;
-            
-            // Dapatkan sudut dalam derajat (0 - 360) menggunakan Atan2
-            float angle = Mathf.Atan2(direction.x, direction.z) * Mathf.Rad2Deg;
-            if (angle < 0) angle += 360;
+            Vector3 dir      = hit.transform.position - transform.position;
+            float   distance = dir.magnitude;
+            bool    isFriend = hit.CompareTag(gameObject.tag);
 
-            // Cek apakah kawan atau lawan berdasarkan Tag
-            bool isFriend = hit.CompareTag(gameObject.tag);
+            // Sudut 0–360° dari sumbu Z+, searah jarum jam
+            float angle = Mathf.Atan2(dir.x, dir.z) * Mathf.Rad2Deg;
+            if (angle < 0) angle += 360f;
 
-            // ISI DATA REGION (Input 1-16)
-            FillRegionData(inputs, angle, isFriend);
+            // Region 0–3 (kuadran 90°)
+            int region = Mathf.Clamp((int)(angle / 90f), 0, REGION_COUNT - 1);
 
-            // ISI DATA GRID (Input 22-37)
-            if (distance < 5f) { 
-                FillGridData(inputs, angle);
-            }
+            if (isFriend) { friendDistSum[region] += distance; friendCount[region]++; }
+            else          { enemyDistSum[region]  += distance; enemyCount[region]++;  }
 
-            // TA EXTENSION: Dangerousness & Range Awareness (Input 38-45)
-            if (inputCount == 45) {
-                UnitStats targetStats = hit.GetComponent<UnitStats>();
-                FillExtensionData(inputs, angle, targetStats, isFriend);
+            // Grid kecil (8 arah 45°) – hanya jika dalam gridRadius
+            if (distance <= gridRadius) {
+                int gridIdx = Mathf.Clamp((int)(angle / 45f), 0, GRID_COUNT - 1);
+                if (isFriend) inputs[29 + gridIdx] = 1f; // Id 30–37: Friend at Grid
+                else          inputs[21 + gridIdx] = 1f; // Id 22–29: Enemy  at Grid
             }
         }
 
-        // Input 17-21: Status Internal (HP & Posisi)
+        // Isi region inputs [0–15]
+        for (int r = 0; r < REGION_COUNT; r++) {
+            // Average distance ternormalisasi dengan sensorRadius
+            inputs[r]      = enemyCount[r]  > 0
+                             ? Mathf.Clamp01(enemyDistSum[r]  / enemyCount[r]  / sensorRadius)
+                             : 0f;
+            inputs[4 + r]  = friendCount[r] > 0
+                             ? Mathf.Clamp01(friendDistSum[r] / friendCount[r] / sensorRadius)
+                             : 0f;
+
+            // Count ternormalisasi (maks ~14 unit per region dari 28 musuh)
+            inputs[8 + r]  = Mathf.Clamp01(enemyCount[r]  / 14f);
+            inputs[12 + r] = Mathf.Clamp01(friendCount[r] / 14f);
+        }
+
+        // Self stats [16–19]
         UnitStats myStats = GetComponent<UnitStats>();
         if (myStats != null && myStats.profile != null) {
-            inputs[16] = myStats.currentHealth / myStats.profile.RealHealth; // HP (0-1)
+            inputs[16] = Mathf.Clamp01(myStats.currentHealth / myStats.profile.RealHealth);
+            inputs[17] = Mathf.Clamp01(myStats.profile.delayPoint  / 6f); // delay point 1–6
+            inputs[18] = Mathf.Clamp01(myStats.profile.attackPoint / 4f); // attack point 1–4
+            inputs[19] = Mathf.Clamp01(myStats.profile.firePoint   / 4f); // fire   point 1–4
         }
-        inputs[17] = transform.position.x / 50f; // Posisi X ternormalisasi
-        inputs[18] = transform.position.z / 50f; // Posisi Z ternormalisasi
+
+        // Previous action output [20]
+        inputs[20] = previousActionOutput;
 
         return inputs;
-    }
-
-    void FillRegionData(float[] inputs, float angle, bool isFriend) {
-        int regionIdx = (int)(angle / 90f); // Membagi 360 jadi 4 (0,1,2,3)
-        if (regionIdx > 3) regionIdx = 3;
-
-        // Offset: Kawan index 0-3, Lawan index 4-7 (menurut paper)
-        int baseOffset = isFriend ? 0 : 4; 
-        
-        // Tambahkan nilai kecil setiap ada unit (akumulatif)
-        inputs[baseOffset + regionIdx] = Mathf.Min(inputs[baseOffset + regionIdx] + 0.1f, 1f);
-    }
-
-    void FillGridData(float[] inputs, float angle) {
-        int gridIdx = (int)(angle / 45f); // Membagi 360 jadi 8
-        if (gridIdx > 7) gridIdx = 7;
-        
-        // Grid index mulai dari neuron ke-22 (index 21)
-        inputs[21 + gridIdx] = 1f; 
-    }
-
-    void FillExtensionData(float[] inputs, float angle, UnitStats targetStats, bool isFriend) {
-        if (isFriend || targetStats == null) return;
-
-        int regionIdx = (int)(angle / 90f);
-        if (regionIdx > 3) regionIdx = 3;
-
-        // Neuron 38-41: Dangerousness (Index 37-40)
-        inputs[37 + regionIdx] += targetStats.profile.RealAttack / 100f;
-
-        // Neuron 42-45: Attack Range Awareness (Index 41-44)
-        inputs[41 + regionIdx] += targetStats.profile.attackRange / 50f;
     }
 }
