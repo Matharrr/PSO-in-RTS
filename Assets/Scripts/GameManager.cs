@@ -42,6 +42,10 @@ public class GameManager : MonoBehaviour {
     public int  testBattleCount    = 100;   // Jumlah battle deterministik (paper pakai ~100)
     public bool autoRunTestAfterGA = true;  // Otomatis jalankan test setelah GA selesai
 
+    [Header("Checkpoint / Resume")]
+    public bool enableCheckpoint   = true;
+    public int  checkpointInterval = 1000;  // Simpan tiap N generasi
+
     // ------------------------------------------------------------------ //
     //  Private State
     // ------------------------------------------------------------------ //
@@ -89,8 +93,8 @@ public class GameManager : MonoBehaviour {
             UpdateBestChromosome();   // simpan kromosom terbaik sebelum evolve
             LogGeneration();
 
-            // Checkpoint otomatis tiap 1000 generasi
-            if (currentGeneration > 0 && currentGeneration % 1000 == 0)
+            // Checkpoint otomatis tiap checkpointInterval generasi
+            if (enableCheckpoint && currentGeneration > 0 && currentGeneration % checkpointInterval == 0)
                 SaveCheckpoint(currentGeneration);
 
             // 4. GA: seleksi → crossover → mutasi
@@ -283,14 +287,15 @@ public class GameManager : MonoBehaviour {
             $"TestMode_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
         File.WriteAllText(testLogPath,
             "Mode,Seed,Battle,Win,TeamA_AvgFitness,TeamA_AliveCount,TeamB_AliveCount\n");
-        Debug.Log($"[TestMode] Mulai – {testBattleCount} battle  seed={testSeed}  log: {testLogPath}");
+        Debug.Log($"[TestMode] Mulai – {testBattleCount} battle  seedBase={testSeed}  log: {testLogPath}");
 
         int   wins        = 0;
         float totalFitA   = 0f;
 
         for (int b = 0; b < testBattleCount; b++) {
-            // Seed per-battle: testSeed + b  → tiap battle berbeda, tapi reproducible
-            Random.InitState(testSeed + b);
+            // PENTING: seed harus berbeda per-battle, kalau tidak semua battle identik.
+            int seed = testSeed + b;
+            Random.InitState(seed);
             SpawnTestBattle();
 
             yield return new WaitForSeconds(battleDuration);
@@ -314,7 +319,7 @@ public class GameManager : MonoBehaviour {
             wins      += win ? 1 : 0;
             totalFitA += avgA;
 
-            string row = $"TestMode,{testSeed},{b + 1},{(win ? 1 : 0)},{avgA:F3},{aliveA},{aliveB}";
+            string row = $"TestMode,{seed},{b + 1},{(win ? 1 : 0)},{avgA:F3},{aliveA},{aliveB}";
             File.AppendAllText(testLogPath, row + "\n");
             Debug.Log(
                 $"[TestMode {b + 1:D2}/{testBattleCount}]  Win={win}" +
@@ -344,23 +349,38 @@ public class GameManager : MonoBehaviour {
     //  Checkpoint
     // ------------------------------------------------------------------ //
     [System.Serializable]
-    private class CheckpointData {
+    public class CheckpointData {
         public int     generation;
-        public float[] bestChromosome;
         public float   bestFitnessEver;
+        public float[] bestChromosome;
     }
 
     void SaveCheckpoint(int gen) {
         if (bestChromosome == null) return;
+
         var data = new CheckpointData {
             generation      = gen,
-            bestChromosome  = bestChromosome,
-            bestFitnessEver = bestFitnessEver
+            bestFitnessEver = bestFitnessEver,
+            bestChromosome  = bestChromosome
         };
-        string json = JsonUtility.ToJson(data, true);
-        string path = Path.Combine(Application.persistentDataPath, $"ckpt_best_gen{gen:D4}.json");
+
+        string json  = JsonUtility.ToJson(data);
+        string path  = Path.Combine(Application.persistentDataPath, $"ckpt_best_{gen}.json");
         File.WriteAllText(path, json);
-        Debug.Log($"[CKPT] Gen {gen} → {path}");
+        Debug.Log($"[CKPT] Saved {path}");
+    }
+
+    /// <summary>Load bestChromosome dari file checkpoint (opsional – untuk evaluasi/resume manual).</summary>
+    public void LoadCheckpoint(string path) {
+        if (!File.Exists(path)) {
+            Debug.LogWarning($"[CKPT] File tidak ditemukan: {path}");
+            return;
+        }
+        string json = File.ReadAllText(path);
+        var data = JsonUtility.FromJson<CheckpointData>(json);
+        bestChromosome  = data.bestChromosome;
+        bestFitnessEver = data.bestFitnessEver;
+        Debug.Log($"[CKPT] Loaded gen={data.generation}  bestFitnessEver={data.bestFitnessEver:F1}  dari {path}");
     }
 
     // ------------------------------------------------------------------ //
