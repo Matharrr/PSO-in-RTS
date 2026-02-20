@@ -1,6 +1,8 @@
 using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
+using Random = UnityEngine.Random;
 
 /// <summary>
 /// GameManager – Genetic Algorithm (Eks 1: Replikasi Paper Murni)
@@ -35,6 +37,11 @@ public class GameManager : MonoBehaviour {
     public int   currentGeneration = 0;
     public float bestFitnessEver   = float.MinValue;
 
+    [Header("Test Mode Settings")]
+    public int  testSeed           = 42;    // Seed base deterministik (per-battle: testSeed + b)
+    public int  testBattleCount    = 100;   // Jumlah battle deterministik (paper pakai ~100)
+    public bool autoRunTestAfterGA = true;  // Otomatis jalankan test setelah GA selesai
+
     // ------------------------------------------------------------------ //
     //  Private State
     // ------------------------------------------------------------------ //
@@ -45,6 +52,10 @@ public class GameManager : MonoBehaviour {
     private int       chromosomeLength;
     private List<GameObject> spawnedUnits = new List<GameObject>();
 
+    private float[] bestChromosome;           // Kromosom terbaik sepanjang GA
+    private string  logPath;
+    private string  testLogPath;
+
     // ------------------------------------------------------------------ //
     //  Unity Lifecycle
     // ------------------------------------------------------------------ //
@@ -52,6 +63,13 @@ public class GameManager : MonoBehaviour {
         chromosomeLength = new NeuralNetwork(inputSize).weights.Length; // = 720
         population = InitRandomPopulation();
         fitness    = new float[POPULATION_SIZE];
+
+        // Inisialisasi CSV logger
+        logPath = Path.Combine(Application.persistentDataPath,
+            $"GA_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        File.WriteAllText(logPath, "Generation,BestGen,BestEver,AvgFitness,EliteIndex\n");
+        Debug.Log("GA log file: " + logPath);
+
         StartCoroutine(RunGALoop());
     }
 
@@ -68,7 +86,12 @@ public class GameManager : MonoBehaviour {
 
             // 3. Evaluasi fitness tiap kromosom
             EvaluateFitness();
+            UpdateBestChromosome();   // simpan kromosom terbaik sebelum evolve
             LogGeneration();
+
+            // Checkpoint otomatis tiap 1000 generasi
+            if (currentGeneration > 0 && currentGeneration % 1000 == 0)
+                SaveCheckpoint(currentGeneration);
 
             // 4. GA: seleksi → crossover → mutasi
             population = Evolve(population, fitness);
@@ -77,6 +100,9 @@ public class GameManager : MonoBehaviour {
             ClearBattlefield();
         }
         Debug.Log("=== GA Training Selesai ===");
+
+        if (autoRunTestAfterGA)
+            StartCoroutine(RunTestMode());
     }
 
     // ------------------------------------------------------------------ //
@@ -90,7 +116,8 @@ public class GameManager : MonoBehaviour {
         SpawnTeam("Team_B", new Vector3( 20f, 0f,  0f), chromoOffset: 28);
     }
 
-    void SpawnTeam(string teamTag, Vector3 centerPos, int chromoOffset) {
+    /// <param name="chromosomeOverride">Jika tidak null, semua unit tim ini pakai kromosom ini.</param>
+    void SpawnTeam(string teamTag, Vector3 centerPos, int chromoOffset, float[] chromosomeOverride = null) {
         for (int i = 0; i < totalUnitsPerTeam; i++) {
             GameObject prefab    = unitPrefabs[Random.Range(0, unitPrefabs.Length)];
             Vector3    spawnPos  = centerPos + new Vector3(
@@ -100,12 +127,13 @@ public class GameManager : MonoBehaviour {
             unit.tag   = teamTag;
             unit.layer = LayerMask.NameToLayer(teamTag);
 
-            int chromoIdx = chromoOffset + i;
+            int     chromoIdx   = chromoOffset + i;
+            float[] chromoToUse = chromosomeOverride ?? population[chromoIdx];
 
             // Pasang bobot kromosom ke ANN
             NPCController npc = unit.GetComponent<NPCController>();
             npc.brain = new NeuralNetwork(inputSize);
-            System.Array.Copy(population[chromoIdx], npc.brain.weights, chromosomeLength);
+            System.Array.Copy(chromoToUse, npc.brain.weights, chromosomeLength);
 
             // Tandai kromosom index & reset stats
             UnitStats stats = unit.GetComponent<UnitStats>();
@@ -140,10 +168,37 @@ public class GameManager : MonoBehaviour {
     }
 
     void LogGeneration() {
-        float best = float.MinValue;
-        foreach (float f in fitness) if (f > best) best = f;
-        if (best > bestFitnessEver) bestFitnessEver = best;
-        Debug.Log($"[Gen {currentGeneration:D4}] BestGen={best:F1}  BestEver={bestFitnessEver:F1}");
+        float best     = float.MinValue;
+        float sum      = 0f;
+        int   eliteIdx = 0;
+
+        for (int i = 0; i < fitness.Length; i++) {
+            float f = fitness[i];
+            sum += f;
+            if (f > best) { best = f; eliteIdx = i; }
+        }
+
+        float avg = sum / fitness.Length;
+        // bestFitnessEver already updated by UpdateBestChromosome()
+
+        Debug.Log($"[Gen {currentGeneration:D4}] BestGen={best:F1}  BestEver={bestFitnessEver:F1}  Avg={avg:F1}");
+
+        // Simpan ke CSV
+        string line = $"{currentGeneration},{best:F3},{bestFitnessEver:F3},{avg:F3},{eliteIdx}";
+        File.AppendAllText(logPath, line + "\n");
+    }
+
+    /// <summary>Simpan kromosom terbaik generasi ini jika lebih baik dari bestFitnessEver.</summary>
+    void UpdateBestChromosome() {
+        int bestIdx = 0;
+        for (int i = 1; i < POPULATION_SIZE; i++)
+            if (fitness[i] > fitness[bestIdx]) bestIdx = i;
+
+        if (fitness[bestIdx] > bestFitnessEver) {
+            bestFitnessEver = fitness[bestIdx];
+            bestChromosome  = CopyChromosome(population[bestIdx]);
+            Debug.Log($"[BestEver] Gen={currentGeneration}  Idx={bestIdx}  Fitness={bestFitnessEver:F1}  → bestChromosome tersimpan");
+        }
     }
 
     // ------------------------------------------------------------------ //
@@ -205,6 +260,107 @@ public class GameManager : MonoBehaviour {
         for (int i = 0; i < chromosome.Length; i++)
             if (Random.value < mutationRate)
                 chromosome[i] = Random.Range(-1f, 1f);
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Test Mode (Deterministik – bestEver chromosome)
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// Jalankan <see cref="testBattleCount"/> battle deterministik tanpa evolusi.
+    /// Team A: semua unit pakai bestChromosome.
+    /// Team B: populasi terakhir GA (kromosom 28–55).
+    /// Seed di-reset ke <see cref="testSeed"/> sebelum setiap battle.
+    /// Hasil disimpan ke CSV: Mode, Seed, Battle, Win, TeamA_AvgFitness, TeamA_Alive, TeamB_Alive.
+    /// </summary>
+    public IEnumerator RunTestMode() {
+        if (bestChromosome == null) {
+            Debug.LogWarning("[TestMode] Tidak ada bestChromosome – jalankan GA minimal 1 generasi.");
+            yield break;
+        }
+
+        testLogPath = Path.Combine(Application.persistentDataPath,
+            $"TestMode_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        File.WriteAllText(testLogPath,
+            "Mode,Seed,Battle,Win,TeamA_AvgFitness,TeamA_AliveCount,TeamB_AliveCount\n");
+        Debug.Log($"[TestMode] Mulai – {testBattleCount} battle  seed={testSeed}  log: {testLogPath}");
+
+        int   wins        = 0;
+        float totalFitA   = 0f;
+
+        for (int b = 0; b < testBattleCount; b++) {
+            // Seed per-battle: testSeed + b  → tiap battle berbeda, tapi reproducible
+            Random.InitState(testSeed + b);
+            SpawnTestBattle();
+
+            yield return new WaitForSeconds(battleDuration);
+
+            // Hitung hasil
+            int   aliveA = 0, aliveB = 0;
+            float sumFitA = 0f;
+            foreach (var unit in spawnedUnits) {
+                if (unit == null) continue;
+                UnitStats us = unit.GetComponent<UnitStats>();
+                if (us == null) continue;
+                us.CalculateFinalFitness();
+
+                bool isA = unit.CompareTag("Team_A");
+                if (!us.isDead) { if (isA) aliveA++; else aliveB++; }
+                if (isA) sumFitA += us.fitnessScore;
+            }
+
+            bool  win  = aliveA > aliveB;
+            float avgA = sumFitA / totalUnitsPerTeam;
+            wins      += win ? 1 : 0;
+            totalFitA += avgA;
+
+            string row = $"TestMode,{testSeed},{b + 1},{(win ? 1 : 0)},{avgA:F3},{aliveA},{aliveB}";
+            File.AppendAllText(testLogPath, row + "\n");
+            Debug.Log(
+                $"[TestMode {b + 1:D2}/{testBattleCount}]  Win={win}" +
+                $"  AliveA={aliveA}  AliveB={aliveB}  AvgFitA={avgA:F1}");
+
+            ClearBattlefield();
+        }
+
+        float winRate = (float)wins / testBattleCount * 100f;
+        float avgFit  = totalFitA / testBattleCount;
+        File.AppendAllText(testLogPath,
+            $"SUMMARY,{testSeed},{testBattleCount},{winRate:F1}%,{avgFit:F3},,\n");
+        Debug.Log(
+            $"=== TestMode Selesai  WinRate={winRate:F0}%  AvgFitA={avgFit:F1}  log={testLogPath} ===");
+    }
+
+    /// <summary>Spawn battle test: Team A pakai bestChromosome, Team B pakai populasi GA terakhir.</summary>
+    void SpawnTestBattle() {
+        ClearBattlefield();
+        SpawnTeam("Team_A", new Vector3(-20f, 0f,  0f), chromoOffset: 0,
+                  chromosomeOverride: bestChromosome);
+        SpawnTeam("Team_B", new Vector3( 20f, 0f,  0f), chromoOffset: 28,
+                  chromosomeOverride: null); // pakai populasi terakhir GA
+    }
+
+    // ------------------------------------------------------------------ //
+    //  Checkpoint
+    // ------------------------------------------------------------------ //
+    [System.Serializable]
+    private class CheckpointData {
+        public int     generation;
+        public float[] bestChromosome;
+        public float   bestFitnessEver;
+    }
+
+    void SaveCheckpoint(int gen) {
+        if (bestChromosome == null) return;
+        var data = new CheckpointData {
+            generation      = gen,
+            bestChromosome  = bestChromosome,
+            bestFitnessEver = bestFitnessEver
+        };
+        string json = JsonUtility.ToJson(data, true);
+        string path = Path.Combine(Application.persistentDataPath, $"ckpt_best_gen{gen:D4}.json");
+        File.WriteAllText(path, json);
+        Debug.Log($"[CKPT] Gen {gen} → {path}");
     }
 
     // ------------------------------------------------------------------ //

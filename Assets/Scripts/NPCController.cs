@@ -128,12 +128,45 @@ public class NPCController : MonoBehaviour {
         float range  = isMelee ? meleeRange  : rangedRange;
         float damage = isMelee ? stats.profile.RealAttack : stats.profile.RealFire;
 
-        UnitStats target = FindEnemyInDirection(dir, range);
-        if (target != null) {
-            target.TakeDamage(damage, attacker: stats, isMelee: isMelee); // RC3 + RC2
-        } else {
-            stats.AddFitnessRC7(damage); // RC7: no target
+        // Paper-consistent: attack/fire bisa mengenai unit pertama (friend/enemy)
+        // → memungkinkan RC5.1 (melee ke kawan) dan RC5.2 (fire ke kawan)
+        UnitStats target = FindAnyUnitInDirection(dir, range);
+
+        if (target == null) {
+            // RC7: serangan tidak mengenai siapa pun
+            stats.AddFitnessRC7(damage);
+            return;
         }
+
+        bool isFriend = target.CompareTag(gameObject.tag);
+
+        if (isFriend) {
+            // Target kena RC2 (damage taken), attacker kena RC5 (damage given friend)
+            target.TakeDamage(damage, attacker: null, isMelee: isMelee);
+            stats.AddFitnessRC5(damage);
+        } else {
+            // Musuh: attacker dapat RC3, target kena RC2
+            target.TakeDamage(damage, attacker: stats, isMelee: isMelee);
+        }
+    }
+
+    /// <summary>Cari unit mana pun (friend/enemy) dalam cone 45°, dalam range. Untuk FIRE/ranged.</summary>
+    UnitStats FindAnyUnitInDirection(Vector3 dir, float range) {
+        Collider[] hits = Physics.OverlapSphere(transform.position, range, radar.unitLayer);
+        UnitStats  best    = null;
+        float      bestDot = 0.5f;
+
+        foreach (var hit in hits) {
+            if (hit.gameObject == gameObject) continue;
+
+            UnitStats us = hit.GetComponent<UnitStats>();
+            if (us == null || us.isDead) continue;
+
+            Vector3 toTarget = (hit.transform.position - transform.position).normalized;
+            float   dot      = Vector3.Dot(dir, toTarget);
+            if (dot > bestDot) { bestDot = dot; best = us; }
+        }
+        return best;
     }
 
     /// <summary>Cari musuh terdekat dalam cone 45° ke arah dir, dalam jarak range.</summary>
@@ -157,8 +190,8 @@ public class NPCController : MonoBehaviour {
     }
 
     void OnCollisionEnter(Collision col) {
-        // RC6: tabrakan dengan unit lain
-        if (col.gameObject.CompareTag(gameObject.tag) || col.gameObject.layer == gameObject.layer)
+        // RC6: tabrakan dengan unit lain (friend atau enemy) sesuai paper
+        if (col.gameObject != gameObject && col.gameObject.GetComponent<UnitStats>() != null)
             if (stats != null) stats.AddFitnessRC6();
     }
 }

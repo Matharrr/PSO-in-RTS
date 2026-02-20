@@ -435,6 +435,7 @@ GameObject:
   serializedVersion: 6
   m_Component:
   - component: {fileID: 1005542348}
+  - component: {fileID: 1005542349}
   m_Layer: 0
   m_Name: GameManager
   m_TagString: Untagged
@@ -457,6 +458,35 @@ Transform:
   m_Children: []
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &1005542349
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1005542347}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 189e0c2b6c858984abc0a5c4aea02bc5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  totalUnitsPerTeam: 28
+  battleDuration: 10
+  unitPrefabs:
+  - {fileID: 4558056010027268420, guid: aee4b150b3077e345a81a22304847163, type: 3}
+  - {fileID: 4558056010027268420, guid: cd5411c8f586a2f4681398ebe694dd6c, type: 3}
+  - {fileID: 4558056010027268420, guid: 7730a9c06ee4c834380bd9d3169f278b, type: 3}
+  - {fileID: 4558056010027268420, guid: fbc39e510143dec41a26433de507db10, type: 3}
+  - {fileID: 4558056010027268420, guid: 92a46321140809c4980115e50b0652d0, type: 3}
+  - {fileID: 4558056010027268420, guid: 07cf37bd94f6fb840b58d6000bd16a82, type: 3}
+  - {fileID: 4558056010027268420, guid: 7ae91b6c31940614cb712ae08832ce01, type: 3}
+  crossoverRate: 0.6
+  mutationRate: 0.09
+  maxGenerations: 4000
+  tournamentSize: 3
+  inputSize: 37
+  currentGeneration: 0
+  bestFitnessEver: -3.4028235e+38
 --- !u!1 &1086606825
 GameObject:
   m_ObjectHideFlags: 0
