@@ -17,6 +17,9 @@ using UnityEngine;
 public class UnitStats : MonoBehaviour {
     public UnitProfile profile;
 
+    [Header("Visuals")]
+    public MeshRenderer teamIndicatorRenderer;
+
     public float currentHealth;
     public bool  isDead = false;
 
@@ -27,6 +30,17 @@ public class UnitStats : MonoBehaviour {
     void Start() {
         if (profile != null)
             currentHealth = profile.RealHealth;
+
+        ApplyTeamColor();
+    }
+
+    private void ApplyTeamColor() {
+        if (teamIndicatorRenderer == null) return;
+
+        if (gameObject.layer == LayerMask.NameToLayer("Team_A"))
+            teamIndicatorRenderer.material.color = Color.green;
+        else if (gameObject.layer == LayerMask.NameToLayer("Team_B"))
+            teamIndicatorRenderer.material.color = Color.red;
     }
 
     // ------------------------------------------------------------------ //
@@ -74,5 +88,7 @@ public class UnitStats : MonoBehaviour {
         if (profile != null) currentHealth = profile.RealHealth;
         isDead       = false;
         fitnessScore = 0f;
+
+        ApplyTeamColor();
     }
 }

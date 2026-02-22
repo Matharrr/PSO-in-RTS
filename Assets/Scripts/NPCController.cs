@@ -81,8 +81,8 @@ public class NPCController : MonoBehaviour {
         // Simpan outputs[1] sebagai previous action untuk input 21
         radar.previousActionOutput = outputs[1];
 
-        // Grid arah dari Output 2 (Table IV: range 0-1 dibagi 8 slot)
-        int gridIdx   = Mathf.Clamp((int)(outputs[1] * 8f), 0, 7);
+        // Grid arah dari Output 2 (Table IV: threshold-based sesuai paper)
+        int gridIdx   = Output2ToGrid(outputs[1]);
         Vector3 dir   = GridDirections[gridIdx];
 
         if (!doFire && !doAttack) {
@@ -193,5 +193,20 @@ public class NPCController : MonoBehaviour {
         // RC6: tabrakan dengan unit lain (friend atau enemy) sesuai paper
         if (col.gameObject != gameObject && col.gameObject.GetComponent<UnitStats>() != null)
             if (stats != null) stats.AddFitnessRC6();
+    }
+
+    /// <summary>
+    /// Konversi Output 2 (0..1) ke index grid (0..7) sesuai Table IV paper.
+    /// Threshold: 0.00-0.11=Grid1, 0.11-0.22=Grid2, ..., 0.77-1.00=Grid8.
+    /// </summary>
+    int Output2ToGrid(float o2) {
+        if (o2 < 0.11f) return 0; // Grid 1: N
+        if (o2 < 0.22f) return 1; // Grid 2: NE
+        if (o2 < 0.33f) return 2; // Grid 3: E
+        if (o2 < 0.44f) return 3; // Grid 4: SE
+        if (o2 < 0.55f) return 4; // Grid 5: S
+        if (o2 < 0.66f) return 5; // Grid 6: SW
+        if (o2 < 0.77f) return 6; // Grid 7: W
+        return 7;                  // Grid 8: NW
     }
 }

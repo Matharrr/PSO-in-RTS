@@ -487,6 +487,14 @@ MonoBehaviour:
   inputSize: 37
   currentGeneration: 0
   bestFitnessEver: -3.4028235e+38
+  testSeed: 42
+  testBattleCount: 100
+  autoRunTestAfterGA: 1
+  runTestOnly: 1
+  checkpointFile: ckpt_gen_1000.json
+  measurementMode: 1
+  enableCheckpoint: 1
+  checkpointInterval: 1000
 --- !u!1 &1086606825
 GameObject:
   m_ObjectHideFlags: 0

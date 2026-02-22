@@ -38,9 +38,13 @@ public class GameManager : MonoBehaviour {
     public float bestFitnessEver   = float.MinValue;
 
     [Header("Test Mode Settings")]
-    public int  testSeed           = 42;    // Seed base deterministik (per-battle: testSeed + b)
-    public int  testBattleCount    = 100;   // Jumlah battle deterministik (paper pakai ~100)
-    public bool autoRunTestAfterGA = true;  // Otomatis jalankan test setelah GA selesai
+    public int    testSeed           = 42;    // Seed base deterministik (per-battle: testSeed + b)
+    public int    testBattleCount    = 100;   // Jumlah battle deterministik (paper pakai ~100)
+    public bool   autoRunTestAfterGA = true;  // Otomatis jalankan test setelah GA selesai
+    public bool   runTestOnly        = false; // TRUE = skip GA, langsung load ckpt & test
+    public string checkpointFile     = "ckpt_gen_1000.json"; // File ckpt untuk runTestOnly
+    [Tooltip("TRUE = paper-like measurement (pakai snapshot population 56 kromosom).\nFALSE = sanity check lama (bestChromosome vs random).")]
+    public bool   measurementMode    = true;  // TRUE = paper-like (snapshot population)
 
     [Header("Checkpoint / Resume")]
     public bool enableCheckpoint   = true;
@@ -65,16 +69,30 @@ public class GameManager : MonoBehaviour {
     // ------------------------------------------------------------------ //
     void Start() {
         chromosomeLength = new NeuralNetwork(inputSize).weights.Length; // = 720
-        population = InitRandomPopulation();
-        fitness    = new float[POPULATION_SIZE];
 
-        // Inisialisasi CSV logger
-        logPath = Path.Combine(Application.persistentDataPath,
-            $"GA_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
-        File.WriteAllText(logPath, "Generation,BestGen,BestEver,AvgFitness,EliteIndex\n");
-        Debug.Log("GA log file: " + logPath);
+        if (runTestOnly) {
+            // ── Test-Only Mode ──────────────────────────────────────────
+            // Seed dulu supaya population random lawan selalu konsisten tiap run
+            Random.InitState(testSeed);
+            population = InitRandomPopulation();
+            fitness    = new float[POPULATION_SIZE];
 
-        StartCoroutine(RunGALoop());
+            string ckptPath = Path.Combine(Application.persistentDataPath, checkpointFile);
+            LoadCheckpoint(ckptPath);
+            StartCoroutine(RunTestMode());
+        } else {
+            // ── Training Mode (GA Normal) ────────────────────────────────
+            population = InitRandomPopulation();
+            fitness    = new float[POPULATION_SIZE];
+
+            // Inisialisasi CSV logger
+            logPath = Path.Combine(Application.persistentDataPath,
+                $"GA_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            File.WriteAllText(logPath, "Generation,BestGen,BestEver,AvgFitness,EliteIndex\n");
+            Debug.Log("GA log file: " + logPath);
+
+            StartCoroutine(RunGALoop());
+        }
     }
 
     // ------------------------------------------------------------------ //
@@ -278,25 +296,36 @@ public class GameManager : MonoBehaviour {
     /// Hasil disimpan ke CSV: Mode, Seed, Battle, Win, TeamA_AvgFitness, TeamA_Alive, TeamB_Alive.
     /// </summary>
     public IEnumerator RunTestMode() {
-        if (bestChromosome == null) {
-            Debug.LogWarning("[TestMode] Tidak ada bestChromosome – jalankan GA minimal 1 generasi.");
-            yield break;
+        // Guard: validasi ketersediaan data
+        if (measurementMode) {
+            if (population == null || population.Length != POPULATION_SIZE) {
+                Debug.LogWarning("[Measurement] Population snapshot belum ada. Load checkpoint yang berisi population (ckpt_gen_XXXX.json).");
+                yield break;
+            }
+        } else {
+            if (bestChromosome == null) {
+                Debug.LogWarning("[TestMode] Tidak ada bestChromosome – jalankan GA minimal 1 generasi.");
+                yield break;
+            }
         }
 
+        string modeName = measurementMode ? "MEASURE" : "TEST";
         testLogPath = Path.Combine(Application.persistentDataPath,
-            $"TestMode_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
+            $"{modeName}_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
         File.WriteAllText(testLogPath,
-            "Mode,Seed,Battle,Win,TeamA_AvgFitness,TeamA_AliveCount,TeamB_AliveCount\n");
-        Debug.Log($"[TestMode] Mulai – {testBattleCount} battle  seedBase={testSeed}  log: {testLogPath}");
+            "Mode,Seed,Battle,Win,AliveA,AliveB,TeamA_AvgFitness\n");
+        Debug.Log($"[{modeName}] Mulai – {testBattleCount} battle  seedBase={testSeed}  log: {testLogPath}");
 
         int   wins        = 0;
         float totalFitA   = 0f;
 
         for (int b = 0; b < testBattleCount; b++) {
-            // PENTING: seed harus berbeda per-battle, kalau tidak semua battle identik.
+            // Seed berbeda per-battle supaya tidak identik
             int seed = testSeed + b;
             Random.InitState(seed);
-            SpawnTestBattle();
+
+            if (measurementMode) SpawnTestBattle_PaperLike();
+            else                 SpawnTestBattle();
 
             yield return new WaitForSeconds(battleDuration);
 
@@ -319,10 +348,10 @@ public class GameManager : MonoBehaviour {
             wins      += win ? 1 : 0;
             totalFitA += avgA;
 
-            string row = $"TestMode,{seed},{b + 1},{(win ? 1 : 0)},{avgA:F3},{aliveA},{aliveB}";
+            string row = $"{modeName},{seed},{b + 1},{(win ? 1 : 0)},{aliveA},{aliveB},{avgA:F3}";
             File.AppendAllText(testLogPath, row + "\n");
             Debug.Log(
-                $"[TestMode {b + 1:D2}/{testBattleCount}]  Win={win}" +
+                $"[{modeName} {b + 1:D2}/{testBattleCount}]  Win={win}" +
                 $"  AliveA={aliveA}  AliveB={aliveB}  AvgFitA={avgA:F1}");
 
             ClearBattlefield();
@@ -331,18 +360,34 @@ public class GameManager : MonoBehaviour {
         float winRate = (float)wins / testBattleCount * 100f;
         float avgFit  = totalFitA / testBattleCount;
         File.AppendAllText(testLogPath,
-            $"SUMMARY,{testSeed},{testBattleCount},{winRate:F1}%,{avgFit:F3},,\n");
+            $"SUMMARY,{testSeed},{testBattleCount},{winRate:F1}%,,, {avgFit:F3}\n");
         Debug.Log(
-            $"=== TestMode Selesai  WinRate={winRate:F0}%  AvgFitA={avgFit:F1}  log={testLogPath} ===");
+            $"=== {modeName} Selesai  WinRate={winRate:F0}%  AvgFitA={avgFit:F1}  log={testLogPath} ===");
     }
 
-    /// <summary>Spawn battle test: Team A pakai bestChromosome, Team B pakai populasi GA terakhir.</summary>
+    /// <summary>
+    /// Measurement stage paper-like (Gen 1000/2000/3000/4000):
+    /// Team A pakai kromosom 0–27 dari population snapshot.
+    /// Team B pakai kromosom 28–55 dari population snapshot.
+    /// TIDAK ada override satu kromosom untuk semua unit.
+    /// </summary>
+    void SpawnTestBattle_PaperLike() {
+        ClearBattlefield();
+        SpawnTeam("Team_A", new Vector3(-20f, 0f,  0f), chromoOffset:  0, chromosomeOverride: null);
+        SpawnTeam("Team_B", new Vector3( 20f, 0f,  0f), chromoOffset: 28, chromosomeOverride: null);
+    }
+
+    /// <summary>
+    /// Spawn battle test (sanity check lama):
+    /// Team A pakai bestChromosome (dari checkpoint).
+    /// Team B pakai population (random deterministik – seed dari testSeed).
+    /// </summary>
     void SpawnTestBattle() {
         ClearBattlefield();
         SpawnTeam("Team_A", new Vector3(-20f, 0f,  0f), chromoOffset: 0,
                   chromosomeOverride: bestChromosome);
         SpawnTeam("Team_B", new Vector3( 20f, 0f,  0f), chromoOffset: 28,
-                  chromosomeOverride: null); // pakai populasi terakhir GA
+                  chromosomeOverride: null);
     }
 
     // ------------------------------------------------------------------ //
@@ -353,24 +398,34 @@ public class GameManager : MonoBehaviour {
         public int     generation;
         public float   bestFitnessEver;
         public float[] bestChromosome;
+        // Population snapshot (flattened): population[i][j] = populationFlat[i * chromoLength + j]
+        public int     populationSize;    // = 56
+        public int     chromoLength;      // = 720
+        public float[] populationFlat;    // length = populationSize * chromoLength
     }
 
     void SaveCheckpoint(int gen) {
-        if (bestChromosome == null) return;
+        // Flatten population untuk serialisasi JsonUtility (tidak support jagged array)
+        float[] flat = new float[POPULATION_SIZE * chromosomeLength];
+        for (int i = 0; i < POPULATION_SIZE; i++)
+            System.Array.Copy(population[i], 0, flat, i * chromosomeLength, chromosomeLength);
 
         var data = new CheckpointData {
             generation      = gen,
             bestFitnessEver = bestFitnessEver,
-            bestChromosome  = bestChromosome
+            bestChromosome  = bestChromosome,
+            populationSize  = POPULATION_SIZE,
+            chromoLength    = chromosomeLength,
+            populationFlat  = flat
         };
 
         string json  = JsonUtility.ToJson(data);
-        string path  = Path.Combine(Application.persistentDataPath, $"ckpt_best_{gen}.json");
+        string path  = Path.Combine(Application.persistentDataPath, $"ckpt_gen_{gen}.json");
         File.WriteAllText(path, json);
-        Debug.Log($"[CKPT] Saved {path}");
+        Debug.Log($"[CKPT] Saved {path}  (population snapshot {POPULATION_SIZE}×{chromosomeLength} disertakan)");
     }
 
-    /// <summary>Load bestChromosome dari file checkpoint (opsional – untuk evaluasi/resume manual).</summary>
+    /// <summary>Load bestChromosome dan population snapshot dari file checkpoint.</summary>
     public void LoadCheckpoint(string path) {
         if (!File.Exists(path)) {
             Debug.LogWarning($"[CKPT] File tidak ditemukan: {path}");
@@ -380,7 +435,22 @@ public class GameManager : MonoBehaviour {
         var data = JsonUtility.FromJson<CheckpointData>(json);
         bestChromosome  = data.bestChromosome;
         bestFitnessEver = data.bestFitnessEver;
-        Debug.Log($"[CKPT] Loaded gen={data.generation}  bestFitnessEver={data.bestFitnessEver:F1}  dari {path}");
+
+        // Rekonstruksi population dari flat array
+        if (data.populationFlat != null &&
+            data.populationSize  == POPULATION_SIZE &&
+            data.chromoLength    == chromosomeLength) {
+            population = new float[POPULATION_SIZE][];
+            for (int i = 0; i < POPULATION_SIZE; i++) {
+                population[i] = new float[chromosomeLength];
+                System.Array.Copy(data.populationFlat, i * chromosomeLength,
+                                  population[i], 0, chromosomeLength);
+            }
+            Debug.Log($"[CKPT] Loaded gen={data.generation}  bestFitnessEver={data.bestFitnessEver:F1}" +
+                      $"  + population snapshot {POPULATION_SIZE}×{chromosomeLength}  dari {path}");
+        } else {
+            Debug.LogWarning("[CKPT] Population snapshot tidak ada atau tidak valid di file checkpoint ini.");
+        }
     }
 
     // ------------------------------------------------------------------ //
