@@ -33,6 +33,10 @@ public class GameManager : MonoBehaviour {
     public int   tournamentSize = 3;          // k untuk Tournament Selection
     public int   inputSize      = 37;         // Old ANN (replikasi murni)
 
+    [Header("Training Seed")]
+    [Tooltip("Seed untuk training GA. Isi nilai tetap agar training reproducible;\nset ke 0 untuk random setiap run (behavior lama).")]
+    public int trainSeed = 0;                 // 0 = tidak di-seed (random)
+
     [Header("Runtime (Read-Only)")]
     public int   currentGeneration = 0;
     public float bestFitnessEver   = float.MinValue;
@@ -47,8 +51,11 @@ public class GameManager : MonoBehaviour {
     public bool   measurementMode    = true;  // TRUE = paper-like (snapshot population)
 
     [Header("Checkpoint / Resume")]
-    public bool enableCheckpoint   = true;
-    public int  checkpointInterval = 1000;  // Simpan tiap N generasi
+    public bool   enableCheckpoint    = true;
+    public int    checkpointInterval  = 1000;  // Simpan tiap N generasi
+    [Tooltip("TRUE = lanjutkan training dari checkpoint.\nIsi resumeCheckpointFile dengan nama file ckpt yang ingin dilanjutkan.")]
+    public bool   resumeTraining      = false;
+    public string resumeCheckpointFile = "ckpt_gen_1000.json"; // File ckpt untuk resume
 
     // ------------------------------------------------------------------ //
     //  Private State
@@ -81,9 +88,18 @@ public class GameManager : MonoBehaviour {
             LoadCheckpoint(ckptPath);
             StartCoroutine(RunTestMode());
         } else {
-            // ── Training Mode (GA Normal) ────────────────────────────────
+            // ── Training Mode (GA Normal) ────────────────────────────
+            // Seed training agar reproducible (trainSeed=0 berarti tidak di-seed)
+            if (trainSeed != 0) Random.InitState(trainSeed);
             population = InitRandomPopulation();
             fitness    = new float[POPULATION_SIZE];
+
+            // Resume dari checkpoint jika diminta
+            if (resumeTraining) {
+                string ckptPath = Path.Combine(Application.persistentDataPath, resumeCheckpointFile);
+                LoadCheckpoint(ckptPath);
+                Debug.Log($"[RESUME] Melanjutkan training dari gen={currentGeneration}");
+            }
 
             // Inisialisasi CSV logger
             logPath = Path.Combine(Application.persistentDataPath,
@@ -140,33 +156,47 @@ public class GameManager : MonoBehaviour {
 
     /// <param name="chromosomeOverride">Jika tidak null, semua unit tim ini pakai kromosom ini.</param>
     void SpawnTeam(string teamTag, Vector3 centerPos, int chromoOffset, float[] chromosomeOverride = null) {
-        for (int i = 0; i < totalUnitsPerTeam; i++) {
-            GameObject prefab    = unitPrefabs[Random.Range(0, unitPrefabs.Length)];
-            Vector3    spawnPos  = centerPos + new Vector3(
-                Random.Range(-4f, 4f), 0.5f, Random.Range(-15f, 15f));
+        // Roster tetap: 4 unit per tipe × 7 tipe = 28 unit per tim
+        // Sesuai paper — komposisi tim tidak acak agar total HP kedua tim selalu seimbang
+        // dan hasil measurement bisa dibandingkan langsung dengan tabel paper.
+        // SYARAT: unitPrefabs.Length == 7, totalUnitsPerTeam == 28
+        Debug.Assert(unitPrefabs.Length == 7,
+            "[SpawnTeam] unitPrefabs harus berisi tepat 7 prefab (1 per unit type)!");
 
-            GameObject unit = Instantiate(prefab, spawnPos, Quaternion.identity);
-            unit.tag   = teamTag;
-            unit.layer = LayerMask.NameToLayer(teamTag);
+        int unitsPerType = totalUnitsPerTeam / unitPrefabs.Length; // = 4
+        int idx = 0;
 
-            int     chromoIdx   = chromoOffset + i;
-            float[] chromoToUse = chromosomeOverride ?? population[chromoIdx];
+        for (int t = 0; t < unitPrefabs.Length; t++) {
+            for (int k = 0; k < unitsPerType; k++) {
+                GameObject prefab   = unitPrefabs[t];
+                Vector3    spawnPos = centerPos + new Vector3(
+                    Random.Range(-4f, 4f), 0.5f, Random.Range(-15f, 15f));
 
-            // Pasang bobot kromosom ke ANN
-            NPCController npc = unit.GetComponent<NPCController>();
-            npc.brain = new NeuralNetwork(inputSize);
-            System.Array.Copy(chromoToUse, npc.brain.weights, chromosomeLength);
+                GameObject unit = Instantiate(prefab, spawnPos, Quaternion.identity);
+                unit.tag   = teamTag;
+                unit.layer = LayerMask.NameToLayer(teamTag);
 
-            // Tandai kromosom index & reset stats
-            UnitStats stats = unit.GetComponent<UnitStats>();
-            if (stats != null) {
-                stats.chromosomeIndex = chromoIdx;
-                stats.ResetStats();
+                int     chromoIdx   = chromoOffset + idx;
+                float[] chromoToUse = chromosomeOverride ?? population[chromoIdx];
+
+                // Pasang bobot kromosom ke ANN
+                NPCController npc = unit.GetComponent<NPCController>();
+                npc.brain = new NeuralNetwork(inputSize);
+                System.Array.Copy(chromoToUse, npc.brain.weights, chromosomeLength);
+
+                // Tandai kromosom index & reset stats
+                UnitStats stats = unit.GetComponent<UnitStats>();
+                if (stats != null) {
+                    stats.chromosomeIndex = chromoIdx;
+                    stats.ResetStats();
+                }
+
+                // Mulai loop ANN berbasis timer
+                npc.StartBrainLoop();
+                spawnedUnits.Add(unit);
+
+                idx++;
             }
-
-            // Mulai loop ANN berbasis timer
-            npc.StartBrainLoop();
-            spawnedUnits.Add(unit);
         }
     }
 
@@ -312,13 +342,22 @@ public class GameManager : MonoBehaviour {
         string modeName = measurementMode ? "MEASURE" : "TEST";
         testLogPath = Path.Combine(Application.persistentDataPath,
             $"{modeName}_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
+        // CSV columns:
+        //   WinByHP    = primary win condition (RemainHpA > RemainHpB) — lebih konsisten dengan paper
+        //   WinByAlive = secondary (AliveA > AliveB)                 — untuk perbandingan
+        //   TieByHP / TieByAlive dicatat masing-masing
         File.WriteAllText(testLogPath,
-            "Mode,Seed,Battle,Win,Tie,AliveA,AliveB,TeamA_AvgFitness\n");
+            "Mode,Seed,Battle," +
+            "WinByHP,TieByHP,WinByAlive,TieByAlive," +
+            "AliveA,AliveB,RemainHpA,RemainHpB,FitA,FitB\n");
         Debug.Log($"[{modeName}] Mulai – {testBattleCount} battle  seedBase={testSeed}  log: {testLogPath}");
 
-        int   wins        = 0;
-        int   ties        = 0;  // Sesuai saran: tie (aliveA==aliveB) dicatat terpisah
-        float totalFitA   = 0f;
+        // Akumulator SUMMARY
+        int   winsHP    = 0;  // win by remaining HP  (primary, paper-consistent)
+        int   tiesHP    = 0;
+        int   winsAlive = 0;  // win by alive count   (secondary, untuk perbandingan)
+        int   tiesAlive = 0;
+        float totalFitA = 0f;
 
         for (int b = 0; b < testBattleCount; b++) {
             // Seed berbeda per-battle supaya tidak identik
@@ -330,9 +369,11 @@ public class GameManager : MonoBehaviour {
 
             yield return new WaitForSeconds(battleDuration);
 
-            // Hitung hasil
-            int   aliveA = 0, aliveB = 0;
-            float sumFitA = 0f;
+            // ── Kumpulkan metrik per battle ─────────────────────────────
+            int   aliveA = 0,  aliveB = 0;
+            float hpA    = 0f, hpB    = 0f;  // Remaining HP (lebih sensitif dari alive count)
+            float sumFitA = 0f, sumFitB = 0f;
+
             foreach (var unit in spawnedUnits) {
                 if (unit == null) continue;
                 UnitStats us = unit.GetComponent<UnitStats>();
@@ -340,33 +381,66 @@ public class GameManager : MonoBehaviour {
                 us.CalculateFinalFitness();
 
                 bool isA = unit.CompareTag("Team_A");
-                if (!us.isDead) { if (isA) aliveA++; else aliveB++; }
-                if (isA) sumFitA += us.fitnessScore;
+                if (!us.isDead) {
+                    if (isA) aliveA++;
+                    else     aliveB++;
+                }
+                // Remaining HP: unit mati sudah currentHealth=0, aman dijumlah tanpa cek isDead
+                if (isA) { hpA += us.currentHealth; sumFitA += us.fitnessScore; }
+                else     { hpB += us.currentHealth; sumFitB += us.fitnessScore; }
             }
 
-            bool  win  = aliveA > aliveB;
-            bool  tie  = aliveA == aliveB; // Tie dicatat terpisah, jangan dihitung loss
+            // ── Tentukan WIN (dua definisi, dicatat dua-duanya) ─────────
+            // PRIMARY (paper-consistent): lebih banyak HP tersisa
+            //   → "troops won because their men were subjected to fewer attacks"
+            //   → lebih sedikit damage masuk = HP tersisa lebih banyak
+            bool winByHP    = hpA > hpB + 1e-3f;
+            bool tieByHP    = Mathf.Abs(hpA - hpB) < 1e-3f;
+
+            // SECONDARY (untuk perbandingan): lebih banyak unit alive
+            bool winByAlive = aliveA > aliveB;
+            bool tieByAlive = aliveA == aliveB;
+
             float avgA = sumFitA / totalUnitsPerTeam;
-            wins      += win ? 1 : 0;
-            ties      += tie ? 1 : 0;
+            float avgB = sumFitB / totalUnitsPerTeam;
+
+            winsHP    += winByHP    ? 1 : 0;
+            tiesHP    += tieByHP    ? 1 : 0;
+            winsAlive += winByAlive ? 1 : 0;
+            tiesAlive += tieByAlive ? 1 : 0;
             totalFitA += avgA;
 
-            string row = $"{modeName},{seed},{b + 1},{(win ? 1 : 0)},{(tie ? 1 : 0)},{aliveA},{aliveB},{avgA:F3}";
+            string row =
+                $"{modeName},{seed},{b + 1}," +
+                $"{(winByHP    ? 1 : 0)},{(tieByHP    ? 1 : 0)}," +
+                $"{(winByAlive ? 1 : 0)},{(tieByAlive ? 1 : 0)}," +
+                $"{aliveA},{aliveB},{hpA:F1},{hpB:F1},{avgA:F3},{avgB:F3}";
             File.AppendAllText(testLogPath, row + "\n");
             Debug.Log(
-                $"[{modeName} {b + 1:D2}/{testBattleCount}]  Win={win}  Tie={tie}" +
-                $"  AliveA={aliveA}  AliveB={aliveB}  AvgFitA={avgA:F1}");
+                $"[{modeName} {b + 1:D2}/{testBattleCount}]" +
+                $"  WinHP={winByHP} (hpA={hpA:F0} hpB={hpB:F0})" +
+                $"  WinAlive={winByAlive} (aA={aliveA} aB={aliveB})" +
+                $"  FitA={avgA:F1}");
 
             ClearBattlefield();
         }
 
-        float winRate  = (float)wins / testBattleCount * 100f;
-        float tieRate  = (float)ties / testBattleCount * 100f;
-        float avgFit   = totalFitA / testBattleCount;
+        // ── SUMMARY ─────────────────────────────────────────────────────
+        float winRateHP    = (float)winsHP    / testBattleCount * 100f;
+        float tieRateHP    = (float)tiesHP    / testBattleCount * 100f;
+        float winRateAlive = (float)winsAlive / testBattleCount * 100f;
+        float tieRateAlive = (float)tiesAlive / testBattleCount * 100f;
+        float avgFit       = totalFitA / testBattleCount;
         File.AppendAllText(testLogPath,
-            $"SUMMARY,{testSeed},{testBattleCount},{winRate:F1}%,{tieRate:F1}%,,, {avgFit:F3}\n");
+            $"SUMMARY,{testSeed},{testBattleCount}," +
+            $"{winRateHP:F1}%,{tieRateHP:F1}%," +
+            $"{winRateAlive:F1}%,{tieRateAlive:F1}%" +
+            $",,,,{avgFit:F3},\n");
         Debug.Log(
-            $"=== {modeName} Selesai  WinRate={winRate:F0}%  TieRate={tieRate:F0}%  AvgFitA={avgFit:F1}  log={testLogPath} ===");
+            $"=== {modeName} Selesai" +
+            $"  WinRate(HP)={winRateHP:F1}%  Tie(HP)={tieRateHP:F1}%" +
+            $"  WinRate(Alive)={winRateAlive:F1}%  Tie(Alive)={tieRateAlive:F1}%" +
+            $"  AvgFitA={avgFit:F1}  log={testLogPath} ===");
     }
 
     /// <summary>
@@ -439,6 +513,7 @@ public class GameManager : MonoBehaviour {
         var data = JsonUtility.FromJson<CheckpointData>(json);
         bestChromosome  = data.bestChromosome;
         bestFitnessEver = data.bestFitnessEver;
+        currentGeneration = data.generation; // Pulihkan posisi generasi untuk resume training
 
         // Rekonstruksi population dari flat array
         if (data.populationFlat != null &&
