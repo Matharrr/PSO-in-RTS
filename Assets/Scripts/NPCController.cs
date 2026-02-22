@@ -78,36 +78,47 @@ public class NPCController : MonoBehaviour {
         bool doFire   = outputs[0] >= 0.5f; // Output 1
         bool doAttack = outputs[2] >= 0.5f; // Output 3
 
-        // Simpan outputs[1] sebagai previous action untuk input 21
-        radar.previousActionOutput = outputs[1];
-
         // Grid arah dari Output 2 (Table IV: threshold-based sesuai paper)
         int gridIdx   = Output2ToGrid(outputs[1]);
         Vector3 dir   = GridDirections[gridIdx];
 
+        // Encode previous action sebagai nilai diskrit untuk input neuron #21
+        // Paper: Prev (Attack/Fire/Move) → nilai diskrit agar ANN punya "memori satu langkah"
+        // MOVE=0.0 | ATTACK=0.33 | FIRE=0.66 | IDLE=1.0
+        float prevAction;
+
         if (!doFire && !doAttack) {
             // MOVE
+            prevAction = 0.0f;
             Move(dir);
             if (stats != null) stats.AddFitnessRC1();
         } else if (!doFire && doAttack) {
             // ATTACK (melee) - RC3.1
+            prevAction = 0.33f;
             StopMoving();
             PerformAttack(dir, isMelee: true);
         } else if (doFire && !doAttack) {
             // FIRE (ranged) - RC3.2
+            prevAction = 0.66f;
             StopMoving();
             PerformAttack(dir, isMelee: false);
         } else {
             // IDLE (keduanya aktif) - RC8
+            prevAction = 1.0f;
             StopMoving();
             if (stats != null) stats.AddFitnessRC8();
         }
+
+        // Simpan aksi yang benar-benar diambil sebagai previous action untuk input #21 berikutnya
+        radar.previousActionOutput = prevAction;
     }
 
     void Move(Vector3 dir) {
         if (rb == null || stats == null || stats.profile == null) return;
-        // Kecepatan: semakin tinggi delay point, semakin cepat unit bergerak
-        float speed = stats.profile.delayPoint * 1.2f;
+        // Kecepatan konstan per profile (default 5 m/s).
+        // Paper hanya mendefinisikan delayPoint sebagai interval ANN (Table V),
+        // bukan kecepatan gerak — pisahkan agar unit tidak "double slow".
+        float speed = stats.profile.moveSpeed;
         rb.velocity = dir * speed;
 
         // Deteksi batas arena → RC4

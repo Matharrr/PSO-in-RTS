@@ -27,6 +27,9 @@ public class UnitStats : MonoBehaviour {
     [HideInInspector] public float fitnessScore    = 0f;
     [HideInInspector] public int   chromosomeIndex = -1; // Diisi GameManager
 
+    // RC6 cooldown: cegah OnCollisionEnter spam selama unit masih bersentuhan
+    private float lastCrashTime = -999f;
+
     void Start() {
         if (profile != null)
             currentHealth = profile.RealHealth;
@@ -73,7 +76,15 @@ public class UnitStats : MonoBehaviour {
     public void AddFitnessRC1()                   => fitnessScore += 0.1f;  // Move Success
     public void AddFitnessRC4()                   => fitnessScore -= 0.1f;  // Crash Wall
     public void AddFitnessRC5(float dmg)          => fitnessScore -= dmg;   // Damage Friend
-    public void AddFitnessRC6()                   => fitnessScore -= 0.1f;  // Crash Unit
+    /// <summary>
+    /// RC6: Crash Friend/Enemy (-0.1). Cooldown mencegah OnCollisionEnter spam
+    /// saat dua collider terus bersentuhan (biasanya berkali-kali per frame).
+    /// </summary>
+    public void AddFitnessRC6(float cooldown = 0.3f) {
+        if (Time.time - lastCrashTime < cooldown) return;
+        lastCrashTime  = Time.time;
+        fitnessScore  -= 0.1f;
+    }
     public void AddFitnessRC7(float dmg)          => fitnessScore -= dmg;   // Damage Nothing
     public void AddFitnessRC8()                   => fitnessScore -= 1f;    // Attack+Fire both
 
@@ -86,8 +97,9 @@ public class UnitStats : MonoBehaviour {
     /// <summary>Reset untuk battle baru.</summary>
     public void ResetStats() {
         if (profile != null) currentHealth = profile.RealHealth;
-        isDead       = false;
-        fitnessScore = 0f;
+        isDead        = false;
+        fitnessScore  = 0f;
+        lastCrashTime = -999f; // Reset cooldown RC6
 
         ApplyTeamColor();
     }

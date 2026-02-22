@@ -313,10 +313,11 @@ public class GameManager : MonoBehaviour {
         testLogPath = Path.Combine(Application.persistentDataPath,
             $"{modeName}_Log_{System.DateTime.Now:yyyyMMdd_HHmmss}.csv");
         File.WriteAllText(testLogPath,
-            "Mode,Seed,Battle,Win,AliveA,AliveB,TeamA_AvgFitness\n");
+            "Mode,Seed,Battle,Win,Tie,AliveA,AliveB,TeamA_AvgFitness\n");
         Debug.Log($"[{modeName}] Mulai – {testBattleCount} battle  seedBase={testSeed}  log: {testLogPath}");
 
         int   wins        = 0;
+        int   ties        = 0;  // Sesuai saran: tie (aliveA==aliveB) dicatat terpisah
         float totalFitA   = 0f;
 
         for (int b = 0; b < testBattleCount; b++) {
@@ -344,25 +345,28 @@ public class GameManager : MonoBehaviour {
             }
 
             bool  win  = aliveA > aliveB;
+            bool  tie  = aliveA == aliveB; // Tie dicatat terpisah, jangan dihitung loss
             float avgA = sumFitA / totalUnitsPerTeam;
             wins      += win ? 1 : 0;
+            ties      += tie ? 1 : 0;
             totalFitA += avgA;
 
-            string row = $"{modeName},{seed},{b + 1},{(win ? 1 : 0)},{aliveA},{aliveB},{avgA:F3}";
+            string row = $"{modeName},{seed},{b + 1},{(win ? 1 : 0)},{(tie ? 1 : 0)},{aliveA},{aliveB},{avgA:F3}";
             File.AppendAllText(testLogPath, row + "\n");
             Debug.Log(
-                $"[{modeName} {b + 1:D2}/{testBattleCount}]  Win={win}" +
+                $"[{modeName} {b + 1:D2}/{testBattleCount}]  Win={win}  Tie={tie}" +
                 $"  AliveA={aliveA}  AliveB={aliveB}  AvgFitA={avgA:F1}");
 
             ClearBattlefield();
         }
 
-        float winRate = (float)wins / testBattleCount * 100f;
-        float avgFit  = totalFitA / testBattleCount;
+        float winRate  = (float)wins / testBattleCount * 100f;
+        float tieRate  = (float)ties / testBattleCount * 100f;
+        float avgFit   = totalFitA / testBattleCount;
         File.AppendAllText(testLogPath,
-            $"SUMMARY,{testSeed},{testBattleCount},{winRate:F1}%,,, {avgFit:F3}\n");
+            $"SUMMARY,{testSeed},{testBattleCount},{winRate:F1}%,{tieRate:F1}%,,, {avgFit:F3}\n");
         Debug.Log(
-            $"=== {modeName} Selesai  WinRate={winRate:F0}%  AvgFitA={avgFit:F1}  log={testLogPath} ===");
+            $"=== {modeName} Selesai  WinRate={winRate:F0}%  TieRate={tieRate:F0}%  AvgFitA={avgFit:F1}  log={testLogPath} ===");
     }
 
     /// <summary>

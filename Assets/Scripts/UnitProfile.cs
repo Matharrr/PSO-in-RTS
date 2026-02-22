@@ -10,6 +10,10 @@ public class UnitProfile : ScriptableObject {
     public int delayPoint;
     public int healthPoint;
 
+    [Header("Movement")]
+    [Tooltip("Kecepatan gerak unit (m/s). Paper tidak menyebut speed per unit-type;\ngunakan nilai konstan (default 5) untuk replikasi baseline paper.")]
+    public float moveSpeed = 5f;
+
     // Konversi poin ke nilai nyata sesuai paper (Table V)
     public float RealHealth => healthPoint * 50f;
     public float RealAttack => attackPoint * 10f;

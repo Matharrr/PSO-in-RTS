@@ -490,7 +490,7 @@ MonoBehaviour:
   testSeed: 42
   testBattleCount: 100
   autoRunTestAfterGA: 1
-  runTestOnly: 1
+  runTestOnly: 0
   checkpointFile: ckpt_gen_1000.json
   measurementMode: 1
   enableCheckpoint: 1
