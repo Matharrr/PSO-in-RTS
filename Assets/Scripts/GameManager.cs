@@ -149,6 +149,10 @@ public class GameManager : MonoBehaviour {
         }
         Debug.Log("=== GA Training Selesai ===");
 
+        // Simpan checkpoint final (gen 4000) – tidak tertangkap oleh kondisi di dalam loop
+        if (enableCheckpoint)
+            SaveCheckpoint(currentGeneration);
+
         if (autoRunTestAfterGA)
             StartCoroutine(RunTestMode());
     }
