@@ -12,12 +12,21 @@ using System.Collections;
 ///
 /// AKSI DISKRIT (Table III):
 ///   Fire<0.5  & Attack<0.5  → MOVE  (RC1)
-///   Fire<0.5  & Attack>=0.5 → ATTACK melee (RC3.1 jika kena, RC7 jika miss)
-///   Fire>=0.5 & Attack<0.5  → FIRE  ranged (RC3.2 jika kena, RC7 jika miss)
+///   Fire<0.5  & Attack>=0.5 → ATTACK melee (RC3.1 jika kena, RC7.1 jika miss)
+///   Fire>=0.5 & Attack<0.5  → FIRE  ranged (RC3.2 jika kena, RC7.1 jika miss)
 ///   Fire>=0.5 & Attack>=0.5 → IDLE  (RC8)
 ///
 /// GRID ARAH (Table IV - 8 compass direction, searah jarum jam dari N):
 ///   Grid 1=N, 2=NE, 3=E, 4=SE, 5=S, 6=SW, 7=W, 8=NW
+///
+/// CONE SERANGAN (100% paper-faithful):
+///   Half-angle = 45° → threshold dot = cos(45°) ≈ 0.707
+///   Target dipilih berdasarkan jarak TERDEKAT dalam cone (bukan best-dot).
+///
+/// RC7.2 SELF (paper Table VI):
+///   Self-hit tidak mungkin terjadi secara geometri dalam simulator ini
+///   (OverlapSphere selalu mengecualikan collider milik unit sendiri).
+///   → RC7.1 (nothing) tetap diterapkan saat tidak ada target di cone.
 /// </summary>
 public class NPCController : MonoBehaviour {
 
@@ -96,11 +105,13 @@ public class NPCController : MonoBehaviour {
             // ATTACK (melee) - RC3.1
             prevAction = 0.33f;
             StopMoving();
+            if (stats != null) stats.AddAttackCount();
             PerformAttack(dir, isMelee: true);
         } else if (doFire && !doAttack) {
             // FIRE (ranged) - RC3.2
             prevAction = 0.66f;
             StopMoving();
+            if (stats != null) stats.AddFireCount();
             PerformAttack(dir, isMelee: false);
         } else {
             // IDLE (keduanya aktif) - RC8
@@ -161,43 +172,67 @@ public class NPCController : MonoBehaviour {
         }
     }
 
-    /// <summary>Cari unit mana pun (friend/enemy) dalam cone 45°, dalam range. Untuk FIRE/ranged.</summary>
+    /// <summary>
+    /// Cari unit mana pun (friend/enemy) dalam cone 45° ke arah dir, dalam range.
+    /// Memilih unit TERDEKAT dalam cone sesuai spirit paper (bukan best-dot).
+    /// Cone threshold = cos(45°) ≈ 0.707, sesuai lebar satu grid (Fig. 3b paper).
+    /// Self dikecualikan → RC7.2 tidak dibangkitkan (self-hit mustahil secara geometri).
+    /// </summary>
     UnitStats FindAnyUnitInDirection(Vector3 dir, float range) {
-        Collider[] hits = Physics.OverlapSphere(transform.position, range, radar.unitLayer);
-        UnitStats  best    = null;
-        float      bestDot = 0.5f;
+        Collider[] hits        = Physics.OverlapSphere(transform.position, range, radar.unitLayer);
+        UnitStats  nearest     = null;
+        float      nearestDist = float.MaxValue;
+
+        // cos(45°) ≈ 0.707 — sesuai lebar grid 45° pada paper Fig. 3b
+        const float ConeThreshold = 0.707f;
 
         foreach (var hit in hits) {
-            if (hit.gameObject == gameObject) continue;
+            if (hit.gameObject == gameObject) continue; // Self dikecualikan (RC7.2 tidak berlaku)
 
             UnitStats us = hit.GetComponent<UnitStats>();
             if (us == null || us.isDead) continue;
 
-            Vector3 toTarget = (hit.transform.position - transform.position).normalized;
-            float   dot      = Vector3.Dot(dir, toTarget);
-            if (dot > bestDot) { bestDot = dot; best = us; }
+            Vector3 toTarget = hit.transform.position - transform.position;
+            float   dist     = toTarget.magnitude;
+            float   dot      = Vector3.Dot(dir, toTarget.normalized);
+
+            if (dot >= ConeThreshold && dist < nearestDist) {
+                nearestDist = dist;
+                nearest     = us;
+            }
         }
-        return best;
+        return nearest;
     }
 
-    /// <summary>Cari musuh terdekat dalam cone 45° ke arah dir, dalam jarak range.</summary>
+    /// <summary>
+    /// Cari musuh TERDEKAT dalam cone 45° ke arah dir, dalam jarak range.
+    /// Cone threshold = cos(45°) ≈ 0.707, sesuai lebar satu grid (Fig. 3b paper).
+    /// </summary>
     UnitStats FindEnemyInDirection(Vector3 dir, float range) {
-        Collider[] hits = Physics.OverlapSphere(transform.position, range, radar.unitLayer);
-        UnitStats  best    = null;
-        float      bestDot = 0.5f; // cos(60°) ≈ 0.5: batas cone
+        Collider[] hits        = Physics.OverlapSphere(transform.position, range, radar.unitLayer);
+        UnitStats  nearest     = null;
+        float      nearestDist = float.MaxValue;
+
+        // cos(45°) ≈ 0.707 — sesuai lebar grid 45° pada paper Fig. 3b
+        const float ConeThreshold = 0.707f;
 
         foreach (var hit in hits) {
-            if (hit.gameObject == gameObject)    continue;
-            if (hit.CompareTag(gameObject.tag))  continue; // Abaikan kawan
+            if (hit.gameObject == gameObject)   continue;
+            if (hit.CompareTag(gameObject.tag)) continue; // Abaikan kawan
 
             UnitStats us = hit.GetComponent<UnitStats>();
             if (us == null || us.isDead) continue;
 
-            Vector3 toTarget = (hit.transform.position - transform.position).normalized;
-            float   dot      = Vector3.Dot(dir, toTarget);
-            if (dot > bestDot) { bestDot = dot; best = us; }
+            Vector3 toTarget = hit.transform.position - transform.position;
+            float   dist     = toTarget.magnitude;
+            float   dot      = Vector3.Dot(dir, toTarget.normalized);
+
+            if (dot >= ConeThreshold && dist < nearestDist) {
+                nearestDist = dist;
+                nearest     = us;
+            }
         }
-        return best;
+        return nearest;
     }
 
     void OnCollisionEnter(Collision col) {

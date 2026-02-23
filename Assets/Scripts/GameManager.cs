@@ -31,7 +31,9 @@ public class GameManager : MonoBehaviour {
     public float mutationRate   = 0.09f;      // Terbaik per paper
     public int   maxGenerations = 4000;       // Sesuai paper
     public int   tournamentSize = 3;          // k untuk Tournament Selection
-    public int   inputSize      = 37;         // Old ANN (replikasi murni)
+    public int   inputSize      = 37;         // ANN input neurons (replikasi murni)
+    [Tooltip("FALSE = paper-faithful (paper tidak menyebut elitism).\nTRUE  = elitism 1 individu terbaik dipertahankan (common GA variant).")]
+    public bool  useElitism     = false;      // Paper tidak menyebut elitism → default OFF
 
     [Header("Time Acceleration")]
     [Tooltip("Faktor pengali kecepatan simulasi. 1 = Normal, 20 = 20x Lebih Cepat")]
@@ -273,14 +275,19 @@ public class GameManager : MonoBehaviour {
     float[][] Evolve(float[][] oldPop, float[] fit) {
         float[][] newPop = new float[POPULATION_SIZE][];
 
-        // Elitism: satu individu terbaik tidak diubah
-        int eliteIdx = 0;
-        for (int i = 1; i < POPULATION_SIZE; i++)
-            if (fit[i] > fit[eliteIdx]) eliteIdx = i;
-        newPop[0] = CopyChromosome(oldPop[eliteIdx]);
+        // Elitism: pertahankan 1 individu terbaik (hanya jika useElitism = true)
+        // Paper tidak menyebut elitism → default OFF untuk replikasi faithful
+        int fillStart = 0;
+        if (useElitism) {
+            int eliteIdx = 0;
+            for (int i = 1; i < POPULATION_SIZE; i++)
+                if (fit[i] > fit[eliteIdx]) eliteIdx = i;
+            newPop[0] = CopyChromosome(oldPop[eliteIdx]);
+            fillStart = 1;
+        }
 
-        // Isi sisa dengan Tournament → Crossover → Mutasi
-        for (int i = 1; i < POPULATION_SIZE; i += 2) {
+        // Isi populasi baru dengan Tournament → Crossover → Mutasi
+        for (int i = fillStart; i < POPULATION_SIZE; i += 2) {
             int p1 = TournamentSelect(fit);
             int p2 = TournamentSelect(fit);
             Crossover(oldPop[p1], oldPop[p2], out float[] c1, out float[] c2);
@@ -360,10 +367,13 @@ public class GameManager : MonoBehaviour {
         //   WinByHP    = primary win condition (RemainHpA > RemainHpB) — lebih konsisten dengan paper
         //   WinByAlive = secondary (AliveA > AliveB)                 — untuk perbandingan
         //   TieByHP / TieByAlive dicatat masing-masing
+        //   Debug columns: damage taken/given/missed, crash counts, action counts per team
         File.WriteAllText(testLogPath,
             "Mode,Seed,Battle," +
             "WinByHP,TieByHP,WinByAlive,TieByAlive," +
-            "AliveA,AliveB,RemainHpA,RemainHpB,FitA,FitB\n");
+            "AliveA,AliveB,RemainHpA,RemainHpB,FitA,FitB," +
+            "DmgTkA,DmgGivEnemyA,DmgGivFriendA,DmgMissA,CrashWallA,CrashUnitA,MoveA,AtkA,FireA,IdleA," +
+            "DmgTkB,DmgGivEnemyB,DmgGivFriendB,DmgMissB,CrashWallB,CrashUnitB,MoveB,AtkB,FireB,IdleB\n");
         Debug.Log($"[{modeName}] Mulai – {testBattleCount} battle  seedBase={testSeed}  log: {testLogPath}");
 
         // Akumulator SUMMARY
@@ -388,6 +398,12 @@ public class GameManager : MonoBehaviour {
             float hpA    = 0f, hpB    = 0f;  // Remaining HP (lebih sensitif dari alive count)
             float sumFitA = 0f, sumFitB = 0f;
 
+            // Debug accumulators
+            float dmgTkA=0,dmgGivEnemyA=0,dmgGivFriendA=0,dmgMissA=0;
+            float dmgTkB=0,dmgGivEnemyB=0,dmgGivFriendB=0,dmgMissB=0;
+            int   crashWallA=0,crashUnitA=0,moveA=0,atkA=0,fireA=0,idleA=0;
+            int   crashWallB=0,crashUnitB=0,moveB=0,atkB=0,fireB=0,idleB=0;
+
             foreach (var unit in spawnedUnits) {
                 if (unit == null) continue;
                 UnitStats us = unit.GetComponent<UnitStats>();
@@ -402,6 +418,31 @@ public class GameManager : MonoBehaviour {
                 // Remaining HP: unit mati sudah currentHealth=0, aman dijumlah tanpa cek isDead
                 if (isA) { hpA += us.currentHealth; sumFitA += us.fitnessScore; }
                 else     { hpB += us.currentHealth; sumFitB += us.fitnessScore; }
+
+                // Aggregate debug counters per team
+                if (isA) {
+                    dmgTkA          += us.DamageTakenTotal;
+                    dmgGivEnemyA    += us.DamageGivenEnemyTotal;
+                    dmgGivFriendA   += us.DamageGivenFriendTotal;
+                    dmgMissA        += us.DamageMissedTotal;
+                    crashWallA      += us.CrashCountWall;
+                    crashUnitA      += us.CrashCountUnit;
+                    moveA           += us.MoveCount;
+                    atkA            += us.AttackCount;
+                    fireA           += us.FireCount;
+                    idleA           += us.IdleCount;
+                } else {
+                    dmgTkB          += us.DamageTakenTotal;
+                    dmgGivEnemyB    += us.DamageGivenEnemyTotal;
+                    dmgGivFriendB   += us.DamageGivenFriendTotal;
+                    dmgMissB        += us.DamageMissedTotal;
+                    crashWallB      += us.CrashCountWall;
+                    crashUnitB      += us.CrashCountUnit;
+                    moveB           += us.MoveCount;
+                    atkB            += us.AttackCount;
+                    fireB           += us.FireCount;
+                    idleB           += us.IdleCount;
+                }
             }
 
             // ── Tentukan WIN (dua definisi, dicatat dua-duanya) ─────────
@@ -428,13 +469,17 @@ public class GameManager : MonoBehaviour {
                 $"{modeName},{seed},{b + 1}," +
                 $"{(winByHP    ? 1 : 0)},{(tieByHP    ? 1 : 0)}," +
                 $"{(winByAlive ? 1 : 0)},{(tieByAlive ? 1 : 0)}," +
-                $"{aliveA},{aliveB},{hpA:F1},{hpB:F1},{avgA:F3},{avgB:F3}";
+                $"{aliveA},{aliveB},{hpA:F1},{hpB:F1},{avgA:F3},{avgB:F3}," +
+                $"{dmgTkA:F1},{dmgGivEnemyA:F1},{dmgGivFriendA:F1},{dmgMissA:F1},{crashWallA},{crashUnitA},{moveA},{atkA},{fireA},{idleA}," +
+                $"{dmgTkB:F1},{dmgGivEnemyB:F1},{dmgGivFriendB:F1},{dmgMissB:F1},{crashWallB},{crashUnitB},{moveB},{atkB},{fireB},{idleB}";
             File.AppendAllText(testLogPath, row + "\n");
             Debug.Log(
                 $"[{modeName} {b + 1:D2}/{testBattleCount}]" +
                 $"  WinHP={winByHP} (hpA={hpA:F0} hpB={hpB:F0})" +
                 $"  WinAlive={winByAlive} (aA={aliveA} aB={aliveB})" +
-                $"  FitA={avgA:F1}");
+                $"  FitA={avgA:F1}" +
+                $"  A[GivEnemy={dmgGivEnemyA:F0} GivFriend={dmgGivFriendA:F0} Miss={dmgMissA:F0} Mv={moveA} Atk={atkA} Fire={fireA} Idle={idleA}]" +
+                $"  B[GivEnemy={dmgGivEnemyB:F0} GivFriend={dmgGivFriendB:F0} Miss={dmgMissB:F0} Mv={moveB} Atk={atkB} Fire={fireB} Idle={idleB}]");
 
             ClearBattlefield();
         }
