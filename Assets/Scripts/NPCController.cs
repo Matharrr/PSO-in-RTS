@@ -41,6 +41,7 @@ public class NPCController : MonoBehaviour {
     public float arenaHalfSize = 24f; // Batas arena untuk deteksi wall
 
     private Rigidbody rb;
+    private bool _checkingMove = false; // Guard: cegah coroutine CheckMoveSuccess menumpuk
 
     // 8 arah compass (N, NE, E, SE, S, SW, W, NW)
     private static readonly Vector3[] GridDirections = {
@@ -99,8 +100,7 @@ public class NPCController : MonoBehaviour {
         if (!doFire && !doAttack) {
             // MOVE
             prevAction = 0.0f;
-            Move(dir);
-            if (stats != null) stats.AddFitnessRC1();
+            Move(dir); // RC1 dihitung di dalam Move() hanya jika benar-benar bergerak (paper: "Move Success")
         } else if (!doFire && doAttack) {
             // ATTACK (melee) - RC3.1
             prevAction = 0.33f;
@@ -126,18 +126,46 @@ public class NPCController : MonoBehaviour {
 
     void Move(Vector3 dir) {
         if (rb == null || stats == null || stats.profile == null) return;
-        // Kecepatan konstan per profile (default 5 m/s).
-        // Paper hanya mendefinisikan delayPoint sebagai interval ANN (Table V),
-        // bukan kecepatan gerak — pisahkan agar unit tidak "double slow".
-        float speed = stats.profile.moveSpeed;
+
+        float   speed    = stats.profile.moveSpeed;
+        Vector3 startPos = transform.position;
+
+        // Boundary: RC4 (Crash Wall) langsung, paper-specific — lalu keluar, tidak perlu cek displacement
+        if (Mathf.Abs(startPos.x) >= arenaHalfSize || Mathf.Abs(startPos.z) >= arenaHalfSize) {
+            rb.velocity = Vector3.zero;
+            stats.AddFitnessRC4(); // RC4: Crash Wall (-0.1) sesuai paper
+            return;
+        }
+
         rb.velocity = dir * speed;
 
-        // Deteksi batas arena → RC4
-        Vector3 pos = transform.position;
-        if (Mathf.Abs(pos.x) >= arenaHalfSize || Mathf.Abs(pos.z) >= arenaHalfSize) {
-            rb.velocity = Vector3.zero;
-            stats.AddFitnessRC4();
-        }
+        // Guard: jangan tumpuk coroutine jika physics tick lebih cepat dari delay unit
+        if (!_checkingMove)
+            StartCoroutine(CheckMoveSuccess(startPos));
+    }
+
+    /// <summary>
+    /// Tunggu satu FixedUpdate lalu ukur displacement riil.
+    /// RC1 hanya diberikan jika unit benar-benar berpindah (displacement > epsilon) — paper: "Move Success".
+    /// Stuck karena crowding unit lain → netral (tidak RC1, tidak penalti) agar training tidak collapse.
+    /// RC4 (wall) sudah ditangani di Move() sebelum coroutine ini dijalankan.
+    /// </summary>
+    IEnumerator CheckMoveSuccess(Vector3 startPos) {
+        _checkingMove = true;
+        yield return new WaitForFixedUpdate();
+
+        if (stats == null || stats.isDead) { _checkingMove = false; yield break; }
+
+        float displacement = Vector3.Distance(transform.position, startPos);
+
+        // Threshold kecil untuk meredam floating-point noise fisika
+        const float epsilon = 0.05f;
+
+        if (displacement > epsilon)
+            stats.AddFitnessRC1(); // RC1: Move Success — unit benar-benar berpindah
+        // else: stuck karena unit lain (crowding) → netral, tidak RC1 tidak RC4
+
+        _checkingMove = false;
     }
 
     void StopMoving() {
