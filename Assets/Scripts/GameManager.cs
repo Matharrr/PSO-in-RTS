@@ -33,6 +33,11 @@ public class GameManager : MonoBehaviour {
     public int   tournamentSize = 3;          // k untuk Tournament Selection
     public int   inputSize      = 37;         // Old ANN (replikasi murni)
 
+    [Header("Time Acceleration")]
+    [Tooltip("Faktor pengali kecepatan simulasi. 1 = Normal, 20 = 20x Lebih Cepat")]
+    [Range(1f, 100f)]
+    public float timeScaleMultiplier = 20f;
+
     [Header("Training Seed")]
     [Tooltip("Seed untuk training GA. Isi nilai tetap agar training reproducible;\nset ke 0 untuk random setiap run (behavior lama).")]
     public int trainSeed = 0;                 // 0 = tidak di-seed (random)
@@ -75,6 +80,11 @@ public class GameManager : MonoBehaviour {
     //  Unity Lifecycle
     // ------------------------------------------------------------------ //
     void Start() {
+        // Mempercepat laju waktu global
+        Time.timeScale      = timeScaleMultiplier;
+        // Jaga kestabilan fisika (NavMesh, Collision, Sensor) agar tidak tembus
+        Time.fixedDeltaTime = 0.02f / timeScaleMultiplier;
+
         chromosomeLength = new NeuralNetwork(inputSize).weights.Length; // = 720
 
         if (runTestOnly) {

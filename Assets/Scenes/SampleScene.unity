@@ -208,13 +208,13 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 330585543}
   serializedVersion: 2
-  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
-  m_LocalPosition: {x: 0, y: 1, z: -10}
+  m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
+  m_LocalPosition: {x: 0, y: 47.08, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 0}
-  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+  m_LocalEulerAnglesHint: {x: 90, y: 0, z: 0}
 --- !u!114 &330585547
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -485,18 +485,19 @@ MonoBehaviour:
   maxGenerations: 4000
   tournamentSize: 3
   inputSize: 37
-  trainSeed: 0
+  timeScaleMultiplier: 4
+  trainSeed: 67
   currentGeneration: 0
   bestFitnessEver: -3.4028235e+38
   testSeed: 42
   testBattleCount: 100
   autoRunTestAfterGA: 1
-  runTestOnly: 0
+  runTestOnly: 1
   checkpointFile: ckpt_gen_1000.json
   measurementMode: 1
   enableCheckpoint: 1
   checkpointInterval: 1000
-  resumeTraining: 1
+  resumeTraining: 0
   resumeCheckpointFile: ckpt_gen_1000.json
 --- !u!1 &1086606825
 GameObject:
